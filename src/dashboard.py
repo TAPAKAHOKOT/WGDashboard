@@ -499,7 +499,15 @@ def get_conf_list():
                 )
             """
             g.cur.execute(create_table)
-            temp = {"conf": i, "status": get_conf_status(i), "public_key": get_conf_pub_key(i)}
+
+            config = get_dashboard_conf()
+            if i not in config['Configs_autoadd_users']:
+                config.set('Configs_autoadd_users', i, '1')
+                set_dashboard_conf(config)
+                config = get_dashboard_conf()
+            autoadd_users = get_dashboard_conf()['Configs_autoadd_users'][i]
+
+            temp = {"conf": i, "status": get_conf_status(i), "public_key": get_conf_pub_key(i), "autoadd_users": autoadd_users}
             if temp['status'] == "running":
                 temp['checked'] = 'checked'
             else:
@@ -640,8 +648,14 @@ def auth_req():
     conf = get_dashboard_conf()
     req = conf.get("Server", "auth_req")
     session['update'] = UPDATE
-    session['dashboard_version'] = DASHBOARD_VERSION
     if req == "true":
+        if 'X-TOKEN' in request.headers:
+            token = request.headers['X-TOKEN']
+            right_token = conf.get('Account', 'X_TOKEN')
+
+            if right_token == right_token:
+                return None
+
         if '/static/' not in request.path and \
                 request.endpoint != "signin" and \
                 request.endpoint != "signout" and \
@@ -732,6 +746,13 @@ def index():
         session.pop("switch_msg")
 
     return render_template('index.html', conf=get_conf_list(), msg=msg)
+
+
+@app.route('/api/get_conf', methods=['GET'])
+def get_conf_api():
+    return jsonify(get_conf_list())
+
+
 
 
 # Setting Page
