@@ -19,10 +19,12 @@ import urllib.request
 import urllib.error
 from datetime import datetime, timedelta
 from operator import itemgetter
+import io
 # PIP installed library
 import ifcfg
-from flask import Flask, request, render_template, redirect, url_for, session, jsonify, g
+from flask import Flask, request, render_template, redirect, url_for, session, jsonify, g, send_file
 from flask_qrcode import QRcode
+import qrcode
 from icmplib import ping, traceroute
 
 # Import other python files
@@ -746,13 +748,6 @@ def index():
         session.pop("switch_msg")
 
     return render_template('index.html', conf=get_conf_list(), msg=msg)
-
-
-@app.route('/api/get_conf', methods=['GET'])
-def get_conf_api():
-    return jsonify(get_conf_list())
-
-
 
 
 # Setting Page
@@ -1611,11 +1606,166 @@ def traceroute_ip():
         return "Error"
 
 
+
+# API
+@app.route('/api/get_configs', methods=['GET'])
+def api_get_configs():
+    return jsonify(get_conf_list())
+
+
+@app.route('/api/get_config_available_ips/<config_name>', methods=['GET'])
+def api_get_config_available_ips(config_name):
+    return jsonify(f_available_ips(config_name))
+
+
+# Get configuration details
+@app.route('/api/get_config/<config_name>', methods=['GET'])
+def api_get_config(config_name):
+    """
+    Get configuration setting of wireguard interface.
+    @param config_name: Name of WG interface
+    @type config_name: str
+    @return: TODO
+    """
+
+    config_interface = read_conf_file_interface(config_name)
+    search = request.args.get('search')
+    if len(search) == 0:
+        search = ""
+    search = urllib.parse.unquote(search)
+    config = get_dashboard_conf()
+    sort = config.get("Server", "dashboard_sort")
+    peer_display_mode = config.get("Peers", "peer_display_mode")
+    wg_ip = config.get("Peers", "remote_endpoint")
+    if "Address" not in config_interface:
+        conf_address = "N/A"
+    else:
+        conf_address = config_interface['Address']
+    conf_data = {
+        "peer_data": get_peers(config_name, search, sort),
+        "name": config_name,
+        "status": get_conf_status(config_name),
+        "total_data_usage": get_conf_total_data(config_name),
+        "public_key": get_conf_pub_key(config_name),
+        "listen_port": get_conf_listen_port(config_name),
+        "running_peer": get_conf_running_peer_number(config_name),
+        "conf_address": conf_address,
+        "wg_ip": wg_ip,
+        "sort_tag": sort,
+        "dashboard_refresh_interval": int(config.get("Server", "dashboard_refresh_interval")),
+        "peer_display_mode": peer_display_mode
+    }
+    if conf_data['status'] == "stopped":
+        conf_data['checked'] = "nope"
+    else:
+        conf_data['checked'] = "checked"
+    config.clear()
+    return jsonify(conf_data)
+
+
+@app.route("/api/qrcode/<config_name>", methods=['GET'])
+def api_generate_qrcode(config_name):
+    """
+    Generate QRCode
+    @param config_name: Configuration Name
+    @return: Template containing QRcode img
+    """
+    peer_id = request.args.get('id')
+    get_peer = g.cur.execute(
+        "SELECT private_key, allowed_ip, DNS, mtu, endpoint_allowed_ip, keepalive, preshared_key FROM "
+        + config_name + " WHERE id = ?", (peer_id,)).fetchall()
+    config = get_dashboard_conf()
+    if len(get_peer) == 1:
+        peer = get_peer[0]
+        if peer[0] != "":
+            public_key = get_conf_pub_key(config_name)
+            listen_port = get_conf_listen_port(config_name)
+            endpoint = config.get("Peers", "remote_endpoint") + ":" + listen_port
+            private_key = peer[0]
+            allowed_ip = peer[1]
+            dns_addresses = peer[2]
+            mtu_value = peer[3]
+            endpoint_allowed_ip = peer[4]
+            keepalive = peer[5]
+            preshared_key = peer[6]
+
+            result = "[Interface]\nPrivateKey = " + private_key + "\nAddress = " + allowed_ip + "\nMTU = " \
+                     + str(mtu_value) + "\nDNS = " + dns_addresses + "\n\n[Peer]\nPublicKey = " + public_key \
+                     + "\nAllowedIPs = " + endpoint_allowed_ip + "\nPersistentKeepalive = " \
+                     + str(keepalive) + "\nEndpoint = " + endpoint
+            if preshared_key != "":
+                result += "\nPresharedKey = " + preshared_key
+
+            qrcode_file = qrcode.make(result)
+            buf = io.BytesIO()
+            qrcode_file.save(buf)
+            buf.seek(0)
+            return send_file(buf, mimetype='image/jpeg')
+    else:
+        return jsonify(False)
+
+
+# Download configuration file
+@app.route('/api/config_file/<config_name>', methods=['GET'])
+def api_config_file(config_name):
+    """
+    Download one configuration
+    @param config_name: Configuration name
+    @return: JSON object
+    """
+    peer_id = request.args.get('id')
+    get_peer = g.cur.execute(
+        "SELECT private_key, allowed_ip, DNS, mtu, endpoint_allowed_ip, keepalive, preshared_key, name FROM "
+        + config_name + " WHERE id = ?", (peer_id,)).fetchall()
+    config = get_dashboard_conf()
+    if len(get_peer) == 1:
+        peer = get_peer[0]
+        if peer[0] != "":
+            public_key = get_conf_pub_key(config_name)
+            listen_port = get_conf_listen_port(config_name)
+            endpoint = config.get("Peers", "remote_endpoint") + ":" + listen_port
+            private_key = peer[0]
+            allowed_ip = peer[1]
+            dns_addresses = peer[2]
+            mtu_value = peer[3]
+            endpoint_allowed_ip = peer[4]
+            keepalive = peer[5]
+            preshared_key = peer[6]
+            filename = peer[7]
+            if len(filename) == 0:
+                filename = "Untitled_Peer"
+            else:
+                filename = peer[7]
+                # Clean filename
+                illegal_filename = [".", ",", "/", "?", "<", ">", "\\", ":", "*", '|' '\"', "com1", "com2", "com3",
+                                    "com4", "com5", "com6", "com7", "com8", "com9", "lpt1", "lpt2", "lpt3", "lpt4",
+                                    "lpt5", "lpt6", "lpt7", "lpt8", "lpt9", "con", "nul", "prn"]
+                for i in illegal_filename:
+                    filename = filename.replace(i, "")
+                if len(filename) == 0:
+                    filename = "Untitled_Peer"
+                filename = "".join(filename.split(' '))
+            filename = filename + "_" + config_name
+            psk = ""
+            if preshared_key != "":
+                psk = "\nPresharedKey = " + preshared_key
+
+            return_data = "[Interface]\nPrivateKey = " + private_key + "\nAddress = " + allowed_ip + "\nDNS = " + \
+                          dns_addresses + "\nMTU = " + str(mtu_value) + "\n\n[Peer]\nPublicKey = " + \
+                          public_key + "\nAllowedIPs = " + endpoint_allowed_ip + "\nEndpoint = " + \
+                          endpoint + "\nPersistentKeepalive = " + str(keepalive) + psk
+            return_data_bin = return_data.encode('ascii')
+            
+            config_file = io.BytesIO()
+            config_file.write(return_data_bin)
+            config_file.seek(0)
+            return send_file(config_file, mimetype='text')
+    return jsonify(False)
+
+
 """
 Dashboard Initialization
 """
-
-
 def init_dashboard():
     """
     Create dashboard default configuration.
