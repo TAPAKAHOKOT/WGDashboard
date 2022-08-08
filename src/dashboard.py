@@ -1763,6 +1763,64 @@ def api_config_file(config_name):
     return jsonify(False)
 
 
+@app.route('/api/add_peer/<config_name>', methods=['POST'])
+def api_add_peer(config_name):
+    """
+    Add peers by bulk
+    @param config_name: Configuration Name
+    @return: String
+    """
+    data = request.get_json() if request.data else {}
+    endpoint_allowed_ip = data['endpoint_allowed_ip'] if 'endpoint_allowed_ip' in data.keys() else "0.0.0.0/0"
+    dns_addresses = data['DNS'] if 'DNS' in data.keys() else "1.1.1.1"
+    amount = data['amount'] if 'amount' in data.keys() else "1"
+    config_interface = read_conf_file_interface(config_name)
+    if "Address" not in config_interface:
+        return "Configuration must have an IP address."
+    if not amount.isdigit() or int(amount) < 1:
+        return "Amount must be integer larger than 0"
+    amount = int(amount)
+    if not check_DNS(dns_addresses):
+        return "DNS formate is incorrect. Example: 1.1.1.1"
+    if not check_Allowed_IPs(endpoint_allowed_ip):
+        return "Endpoint Allowed IPs format is incorrect."
+    if 'MTU' not in data.keys() or len(data['MTU']) == 0 or not data['MTU'].isdigit():
+        data['MTU'] = "1420"
+    if 'keep_alive' not in data.keys() or len(data['keep_alive']) == 0 or not data['keep_alive'].isdigit():
+        data['keep_alive'] = "21"
+    ips = f_available_ips(config_name)
+    if amount > len(ips):
+        return f"Cannot create more than {len(ips)} peers."
+    wg_command = ["wg", "set", config_name]
+    sql_command = []
+    for i in range(amount):
+        name = f"{config_name}_{datetime.now().strftime('%m%d%Y%H%M%S')}_Peer_#_{(i + 1)}"
+
+        privateKey = subprocess.check_output("wg genkey", shell=True).decode("utf-8").strip()
+        publicKey = subprocess.check_output(f"echo '{privateKey}' | wg pubkey", shell=True).decode("utf-8").strip()
+
+        wg_command.append("peer")
+        wg_command.append(publicKey)
+        allowed_ips = ips.pop(0)
+
+        wg_command.append("allowed-ips")
+        wg_command.append(allowed_ips)
+        update = ["UPDATE ", config_name, " SET name = '", name,
+                  "', private_key = '", privateKey, "', DNS = '", dns_addresses,
+                  "', endpoint_allowed_ip = '", endpoint_allowed_ip, "' WHERE id = '", publicKey, "'"]
+        sql_command.append(update)
+    try:
+        status = subprocess.check_output(" ".join(wg_command), shell=True, stderr=subprocess.STDOUT)
+        status = subprocess.check_output("wg-quick save " + config_name, shell=True, stderr=subprocess.STDOUT)
+        get_all_peers_data(config_name)
+        for i in range(len(sql_command)):
+            sql_command[i] = "".join(sql_command[i])
+        g.cur.executescript("; ".join(sql_command))
+        return publicKey
+    except subprocess.CalledProcessError as exc:
+        return exc.output.strip()
+
+
 """
 Dashboard Initialization
 """
