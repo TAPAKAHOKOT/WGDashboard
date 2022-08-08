@@ -1610,7 +1610,12 @@ def traceroute_ip():
 # API
 @app.route('/api/get_configs', methods=['GET'])
 def api_get_configs():
-    return jsonify(get_conf_list())
+    configs = get_conf_list()
+
+    for config in configs:
+        config['available_ips_num'] = len(f_available_ips(config['conf']))
+
+    return jsonify(configs)
 
 
 @app.route('/api/get_config_available_ips/<config_name>', methods=['GET'])
