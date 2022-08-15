@@ -373,6 +373,18 @@ def get_all_peers_data(config_name):
     get_allowed_ip(conf_peer_data, config_name)
 
 
+def get_all_peers_count():
+    configs = get_conf_list()
+
+    all_peers_count = 0
+    for config in configs:
+        config_peers_count_query = "SELECT COUNT(*) count FROM " + config['conf']
+        config_peers_count, = g.cur.execute(config_peers_count_query).fetchone()
+
+        all_peers_count += config_peers_count
+    return all_peers_count
+
+
 def get_peers(config_name, search, sort_t):
     """
     Get all peers.
@@ -1616,6 +1628,11 @@ def api_get_configs():
         config['available_ips_num'] = len(f_available_ips(config['conf']))
 
     return jsonify(configs)
+
+
+@app.route('/api/get_all_peers_count', methods=['GET'])
+def api_get_all_peers_count():
+    return jsonify(get_all_peers_count())
 
 
 @app.route('/api/get_config_available_ips/<config_name>', methods=['GET'])
