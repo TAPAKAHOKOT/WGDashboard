@@ -48,7 +48,7 @@ DASHBOARD_CONF = os.path.join(configuration_path, 'wg-dashboard.ini')
 UPDATE = None
 
 # Flask App Configuration
-app = Flask("WGDashboard")
+app = Flask(__name__)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 5206928
 app.secret_key = secrets.token_urlsafe(16)
 app.config['TEMPLATES_AUTO_RELOAD'] = True
@@ -663,12 +663,17 @@ def auth_req():
     req = conf.get("Server", "auth_req")
     session['update'] = UPDATE
     if req == "true":
-        if 'X-TOKEN' in request.headers:
-            token = request.headers['X-TOKEN']
-            right_token = conf.get('Account', 'X_TOKEN')
+        if 'IS-API' in request.headers:
+            if request.headers['IS-API'] != "1":
+                return Response("Not auth", status=406, mimetype='application/json')
 
-            if right_token == right_token:
-                return None
+            if 'X-TOKEN' in request.headers:
+                token = request.headers['X-TOKEN']
+                right_token = conf.get('Account', 'X_TOKEN')
+
+                if right_token == right_token:
+                    return None
+            return Response("Not auth", status=406, mimetype='application/json')
 
         if '/static/' not in request.path and \
                 request.endpoint != "signin" and \
@@ -680,7 +685,10 @@ def auth_req():
             else:
                 session['message'] = ""
             conf.clear()
-            return Response("Not auth", status=406, mimetype='application/json')
+            redirectURL = str(request.url)
+            redirectURL = redirectURL.replace("http://", "")
+            redirectURL = redirectURL.replace("https://", "")
+            return redirect("/signin?redirect=" + redirectURL)
     else:
         if request.endpoint in ['signin', 'signout', 'auth', 'settings', 'update_acct', 'update_pwd',
                                 'update_app_ip_port', 'update_wg_conf_path']:
