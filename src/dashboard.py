@@ -22,7 +22,7 @@ from operator import itemgetter
 import io
 # PIP installed library
 import ifcfg
-from flask import Flask, request, render_template, redirect, url_for, session, jsonify, g, send_file
+from flask import Flask, request, render_template, redirect, url_for, session, jsonify, g, send_file, Response
 from flask_qrcode import QRcode
 import qrcode
 from icmplib import ping, traceroute
@@ -675,16 +675,12 @@ def auth_req():
                 request.endpoint != "signout" and \
                 request.endpoint != "auth" and \
                 "username" not in session:
-            print("User not signed in - Attempted access: " + str(request.endpoint))
             if request.endpoint != "index":
                 session['message'] = "You need to sign in first!"
             else:
                 session['message'] = ""
             conf.clear()
-            redirectURL = str(request.url)
-            redirectURL = redirectURL.replace("http://", "")
-            redirectURL = redirectURL.replace("https://", "")
-            return redirect("/signin?redirect=" + redirectURL)
+            return Response("Not auth", status=406, mimetype='application/json')
     else:
         if request.endpoint in ['signin', 'signout', 'auth', 'settings', 'update_acct', 'update_pwd',
                                 'update_app_ip_port', 'update_wg_conf_path']:
@@ -1841,6 +1837,47 @@ def api_add_peer(config_name):
         return publicKey
     except subprocess.CalledProcessError as exc:
         return exc.output.strip()
+
+
+@app.route('/api/remove_peer/<config_name>', methods=['POST'])
+def api_remove_peer(config_name):
+    """
+    Remove peer.
+    @param config_name: Name of WG interface
+    @type config_name: str
+    @return: Return result of action or recommendations
+    @rtype: str
+    """
+
+    if get_conf_status(config_name) == "stopped":
+        return "Your need to turn on " + config_name + " first."
+    data = request.get_json() if request.data else {}
+    if 'peer_id' not in data.keys():
+        return jsonify(False)
+    delete_key = data['peer_id']
+    keys = get_conf_peer_key(config_name)
+    if not isinstance(keys, list):
+        return config_name + " is not running."
+    else:
+        print('else')
+        sql_command = []
+        wg_command = ["wg", "set", config_name]
+        if delete_key not in keys:
+            return "This key does not exist"
+        sql_command.append("DELETE FROM " + config_name + " WHERE id = '" + delete_key + "';")
+        wg_command.append("peer")
+        wg_command.append(delete_key)
+        wg_command.append("remove")
+        try:
+            print('HI 2')
+            remove_wg = subprocess.check_output(" ".join(wg_command),
+                                                shell=True, stderr=subprocess.STDOUT)
+            save_wg = subprocess.check_output(f"wg-quick save {config_name}", shell=True, stderr=subprocess.STDOUT)
+            g.cur.executescript(' '.join(sql_command))
+            g.db.commit()
+        except subprocess.CalledProcessError as exc:
+            return exc.output.strip()
+        return jsonify(True)
 
 
 """
