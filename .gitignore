@@ -17,3 +17,5 @@ src/db/wgdashboard.db
 .jshintrc
 src/venv
 src/log
+gunicorn.pid
+src/wg-dashboard.service

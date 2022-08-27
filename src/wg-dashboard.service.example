@@ -3,9 +3,8 @@ After=syslog.target network-online.target
 ConditionPathIsDirectory=/etc/wireguard
 
 [Service]
-Environment="VIRTUAL_ENV={{VIRTUAL_ENV}}"
-WorkingDirectory={{APP_ROOT}}
-ExecStart={{VIRTUAL_ENV}}/bin/python3 {{APP_ROOT}}/dashboard.py
+WorkingDirectory={WorkingDirectory}
+ExecStart={WorkingDirectory}/venv/bin/python3 {WorkingDirectory}/dashboard.py
 PrivateTmp=yes
 Restart=always
 
